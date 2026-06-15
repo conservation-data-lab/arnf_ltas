@@ -1,0 +1,11 @@
+7149,255,142,66,255,Western Great Plains Shortgrass Prairie
+7050,163,240,219,255,Rocky Mountain Lodgepole Pine Forest
+7055,236,252,204,255,Rocky Mountain Subalpine Dry-Mesic Spruce-Fir Forest and Woodland
+7054,214,255,181,255,Southern Rocky Mountain Ponderosa Pine Woodland
+7126,219,140,37,255,Inter-Mountain Basins Montane Sagebrush Steppe
+9816,255,105,46,255,Northern & Central Plains Ruderal & Planted Grassland
+7086,117,87,61,255,Rocky Mountain Lower Montane-Foothill Shrubland
+7051,0,51,0,255,Southern Rocky Mountain Dry-Mesic Montane Mixed Conifer Forest and Woodland
+7735,159,161,240,255,North American Glacier and Ice Field
+7011,192,255,138,255,Rocky Mountain Aspen Forest and Woodland
+7145,255,163,82,255,Rocky Mountain Subalpine-Montane Mesic Meadow

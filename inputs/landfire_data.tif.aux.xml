@@ -1,0 +1,58 @@
+<PAMDataset>
+  <Metadata>
+    <MDI key="Creator">USGS EROS Landfire Product Service</MDI>
+    <MDI key="DataType">Thematic</MDI>
+  </Metadata>
+  <PAMRasterBand band="1">
+    <Description>US_220BPS</Description>
+    <UnitOfMeasure>Class</UnitOfMeasure>
+    <Histograms>
+      <HistItem>
+        <HistMin>11</HistMin>
+        <HistMax>2718</HistMax>
+        <BucketCount>256</BucketCount>
+        <IncludeOutOfRange>1</IncludeOutOfRange>
+        <Approximate>0</Approximate>
+        <HistCounts>1358261|1204693|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|49129|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|51487|2208272|1009510|405050|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|1269307|22203071|2211664|5180369|840322|0|0|0|0|0|133760|61110|840563|36288|0|0|0|0|0|0|0|0|0|0|0|8465624|35750480|0|0|0|0|4796|280388|3327271|224312|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|24403</HistCounts>
+      </HistItem>
+    </Histograms>
+    <Metadata>
+      <MDI key="BandName">US_220BPS</MDI>
+      <MDI key="RepresentationType">ATHEMATIC</MDI>
+      <MDI key="STATISTICS_COVARIANCES">70420.73631943029,10798.21491177441</MDI>
+      <MDI key="STATISTICS_MAXIMUM">2718</MDI>
+      <MDI key="STATISTICS_MEAN">1259.659007991</MDI>
+      <MDI key="STATISTICS_MEDIAN">1401.654902</MDI>
+      <MDI key="STATISTICS_MINIMUM">11</MDI>
+      <MDI key="STATISTICS_SKIPFACTORX">1</MDI>
+      <MDI key="STATISTICS_SKIPFACTORY">1</MDI>
+      <MDI key="STATISTICS_STDDEV">265.36905682357</MDI>
+    </Metadata>
+  </PAMRasterBand>
+  <PAMRasterBand band="2">
+    <Description>US_250EVT</Description>
+    <UnitOfMeasure>Class</UnitOfMeasure>
+    <Histograms>
+      <HistItem>
+        <HistMin>7011</HistMin>
+        <HistMax>9829</HistMax>
+        <BucketCount>256</BucketCount>
+        <IncludeOutOfRange>1</IncludeOutOfRange>
+        <Approximate>0</Approximate>
+        <HistCounts>2397804|0|0|17156467|400281|307398|2614903|597320|697185|74799|9259096|313351|23037573|0|0|62408|0|16314|0|0|0|0|0|0|0|2304975|2465128|0|0|0|0|0|0|5760|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|669283|0|0|0|0|0|0|0|0|0|0|0|0|0|0|824660|0|357998|0|0|11|11660671|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|294904|2737245|287124|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|217438|476251|55235|4247|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|134134|388724|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|6835497|456022|29924</HistCounts>
+      </HistItem>
+    </Histograms>
+    <Metadata>
+      <MDI key="BandName">US_250EVT</MDI>
+      <MDI key="RepresentationType">ATHEMATIC</MDI>
+      <MDI key="STATISTICS_COVARIANCES">10798.21491177441,722377.126054346</MDI>
+      <MDI key="STATISTICS_MAXIMUM">9829</MDI>
+      <MDI key="STATISTICS_MEAN">7581.0811276732</MDI>
+      <MDI key="STATISTICS_MEDIAN">7143.611765</MDI>
+      <MDI key="STATISTICS_MINIMUM">7011</MDI>
+      <MDI key="STATISTICS_SKIPFACTORX">1</MDI>
+      <MDI key="STATISTICS_SKIPFACTORY">1</MDI>
+      <MDI key="STATISTICS_STDDEV">849.9277181351</MDI>
+    </Metadata>
+  </PAMRasterBand>
+</PAMDataset>

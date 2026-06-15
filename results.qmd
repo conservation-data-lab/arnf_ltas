@@ -1,0 +1,494 @@
+---
+title: "Results"
+---
+
+For the summaries below it is important to remember a few key things:
+
+1. We did not standardize for total area, area per polygon or number of polygons
+2. The total area for the hexagons was the largest
+3. We felt that standardization was not necessary for initial exploration. The purpose was not to compare counts per unit area but to compare three different geographic stratification options. Like ranking states by the number of counties. You don’t rank by number of counties per acre in a state.
+
+## Biophysical Settings
+
+### Average hectares per BpS per unit
+
+In the chart below we summarized the hectares per BpS_Name for the unit types.  This is mostly to showcase which BpSs were dominant as we did not expect any substantial variation in the patterns.
+
+*BpSs with less than 100 ha filtered out. 
+
+<br>
+
+
+```{r}
+#| label: bps summary chart
+#| echo: false
+#| message: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 18
+
+library(tidyverse)
+library(stringr)
+library(janitor)
+library(scales)
+library(vegan)
+
+bps_ltas <- read_csv("outputs_Arapaho_and_Roosevelt_National_Forests/bps_lta_summary_Arapaho and Roosevelt National Forests.csv") |>
+  select(c(UID,
+           hectares,
+           BPS_NAME)) |>
+  rename("id" = "UID") |>
+  mutate(UNIT = "LTA",
+         hectares = round(hectares, 0))|>
+  clean_names()
+
+
+bps_huc12s <- read_csv("outputs_Arapaho_and_Roosevelt_National_Forests/bps_huc12_summary_Arapaho and Roosevelt National Forests.csv") |>
+  select(ID, hectares, BPS_NAME) |>
+  rename(id = ID) |>
+  mutate(
+    id = as.numeric(as.factor(id)),  # convert 'id' column to numeric
+    UNIT = "HUC12",
+    hectares = round(hectares, 0)
+  ) |>
+  clean_names()
+
+
+bps_hexs <- read_csv("outputs_Arapaho_and_Roosevelt_National_Forests/bps_hex_summary_Arapaho and Roosevelt National Forests.csv")|>
+  select(c(hex_id,
+           hectares,
+           BPS_NAME)) |>
+  rename("id" = "hex_id") |>
+  mutate(UNIT = "HEX",
+         hectares = round(hectares, 0))|>
+  clean_names()
+
+bps_merged <- bind_rows(bps_hexs,
+                        bps_huc12s,
+                        bps_ltas)
+
+
+
+# Summarize hectares by bps_name and unit
+bps_summary <- bps_merged %>%
+  group_by(bps_name, unit) %>%
+  summarise(total_hectares = sum(hectares), .groups = "drop") 
+
+
+bps_summary <- bps_summary %>%
+  group_by(bps_name) %>%
+  filter(all(total_hectares >= 100)) %>%
+  ungroup()
+
+
+
+# Calculate mean hectares per bps_name and reverse order
+bps_order <- bps_summary %>%
+  group_by(bps_name) %>%
+  summarise(mean_hectares = mean(total_hectares)) %>%
+  arrange(mean_hectares) %>%  # ascending for reverse order
+  pull(bps_name)
+
+# Wrap long labels
+bps_summary$bps_name <- str_wrap(bps_summary$bps_name, width = 30)
+bps_summary$bps_name <- factor(bps_summary$bps_name, levels = str_wrap(bps_order, width = 30))
+
+
+# Custom colors
+unit_colors <- c(
+  "HEX" = "#C59CD6",
+  "LTA" = "#ADD69C",
+  "HUC12" = "#9BDEDE"
+)
+
+
+# Plot
+ggplot(bps_summary, aes(x = bps_name, y = total_hectares, fill = unit)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  coord_flip() +
+  scale_fill_manual(values = unit_colors) +
+  scale_y_continuous(labels = comma) +  # format y-axis with commas
+  labs(
+    x = "BpS Name",
+    y = "Total Hectares",
+    fill = "Unit",
+    title = "Total Hectares by BpS Name and Unit"
+  ) +
+
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = c(1, 0),  # bottom right
+    legend.justification = c(1, 0)
+  )
+
+
+
+
+```
+
+### Comparing the BpS distributions between units
+
+The violin plot below illustrates the distribution of BpSs per unit type.  Each dot is the number of BpSs for a polygon. 
+
+```{r}
+#| label: bps_violin
+#| echo: false
+#| message: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 12
+
+# Step 1: Summarize unique BPS names per unit and id
+bps_violin <- bps_merged %>%
+  group_by(unit, id) %>%
+  summarise(unique_bps = n_distinct(bps_name), .groups = "drop")
+
+# Step 2: Calculate summary stats for mean and SD
+bps_stats <- bps_violin %>%
+  group_by(unit) %>%
+  summarise(
+    mean_bps = mean(unique_bps),
+    sd_bps = sd(unique_bps),
+    label = paste0("Mean = ", round(mean_bps, 2), "\nSD = ", round(sd_bps, 2)),
+    .groups = "drop"
+  )
+
+# Step 3: Create violin plot with mean, SD bars, and annotation
+ggplot(bps_violin, aes(x = unit, y = unique_bps, fill = unit)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.8) +
+  geom_point(data = bps_stats, aes(x = unit, y = mean_bps), color = "black", size = 3) +
+  geom_errorbar(data = bps_stats,
+                aes(x = unit, ymin = mean_bps - sd_bps, ymax = mean_bps + sd_bps),
+                inherit.aes = FALSE,
+                width = 0.2, color = "black", linewidth = 0.8) +
+  geom_text(data = bps_stats,
+            aes(x = unit, y = 0.5, label = label),
+            inherit.aes = FALSE,
+            hjust = 0.5, vjust = 1,
+            size = 4, color = "black") +
+  labs(
+    title = "Distribution of Unique BPS Names per Unit Type",
+    subtitle = "Violin plot with mean and standard deviation",
+    x = "Unit Type",
+    y = "Number of Unique BPS Names"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_fill_manual(values = c(
+      "HEX" = "#C59CD6",
+      "LTA" = "#ADD69C",
+      "HUC12" = "#9BDEDE"
+  ))
+
+
+```
+
+### Quick statistical look at BpSs
+
+Below we calculate Shannon's Diversity Index per unit type, area-weighted.
+
+```{r}
+#| label: shannon's bps
+#| echo: false
+#| message: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 12
+
+#  Aggregate area per bps_name within each unit and id
+bps_area <- bps_merged %>%
+  group_by(unit, id, bps_name) %>%
+  summarise(area = sum(hectares), .groups = "drop")
+
+#  Pivot to wide format for diversity calculation
+bps_matrix <- bps_area %>%
+  pivot_wider(names_from = bps_name, values_from = area, values_fill = 0)
+
+# Calculate Shannon Diversity Index
+bps_matrix$shannon <- diversity(bps_matrix[ , !(names(bps_matrix) %in% c("unit", "id"))], index = "shannon")
+
+
+# Visualize with violin plot
+ggplot(bps_matrix, aes(x = unit, y = shannon, fill = unit)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.8) +
+  labs(
+    title = "Shannon Diversity Index by Unit Type",
+    subtitle = "Area-weighted ecological diversity",
+    x = "Unit Type",
+    y = "Shannon Diversity Index"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_fill_manual(values = c(
+      "HEX" = "#C59CD6",
+      "LTA" = "#ADD69C",
+      "HUC12" = "#9BDEDE"
+  ))
+```
+
+
+<br>
+
+### Statistical Analysisof BpSs
+
+We used a **Kruskal-Wallis test** to assess differences in Shannon Diversity Index across unit types. This non-parametric test is appropriate for comparing distributions when assumptions of normality may not be met.
+
+The test formula was:
+
+**Shannon Diversity Index ~ Unit Type**
+
+The results were as follows:
+
+- **Kruskal-Wallis Chi-squared**: `r round(kruskal.test(shannon ~ unit, data = bps_matrix)$statistic, 2)`  
+- **Degrees of freedom**: `r kruskal.test(shannon ~ unit, data = bps_matrix)$parameter`  
+- **p-value**: `r format.pval(kruskal.test(shannon ~ unit, data = bps_matrix)$p.value, digits = 3)`
+
+These results suggest `r if (kruskal.test(shannon ~ unit, data = bps_matrix)$p.value < 0.05) {"a statistically significant"} else {"no statistically significant"}` difference in ecological diversity among the unit types.
+
+## Existing Vegetation Types
+
+### Average hectares per EVT per unit
+
+In the chart below we summarized the hectares per BpS_Name for the unit types.  This is mostly to showcase which BpSs were dominant as we did not expect any substantial variation in the patterns.
+
+<br>
+
+
+```{r}
+#| label: evt summary chart
+#| echo: false
+#| message: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 12
+
+library(tidyverse)
+library(stringr)
+library(janitor)
+library(scales)
+library(vegan)
+
+evt_ltas <- read_csv("outputs_Arapaho_and_Roosevelt_National_Forests/evt_lta_summary_Arapaho and Roosevelt National Forests.csv")|>
+  select(c(UID,
+           hectares,
+           EVT_NAME)) |>
+  rename("id" = "UID") |>
+  mutate(UNIT = "LTA",
+         hectares = round(hectares, 0))|>
+  clean_names()
+
+
+evt_huc12s <- read_csv("outputs_Arapaho_and_Roosevelt_National_Forests/evt_huc12_summary_Arapaho and Roosevelt National Forests.csv") |>
+  select(ID, hectares, EVT_NAME) |>
+  rename(id = ID) |>
+  mutate(
+    id = as.numeric(as.factor(id)),  # convert 'id' column to numeric
+    UNIT = "HUC12",
+    hectares = round(hectares, 0)
+  ) |>
+  clean_names()
+
+
+evt_hexs <- read_csv("outputs_Arapaho_and_Roosevelt_National_Forests/evt_hex_summary_Arapaho and Roosevelt National Forests.csv")|>
+  select(c(hex_id,
+           hectares,
+           EVT_NAME)) |>
+  rename("id" = "hex_id") |>
+  mutate(UNIT = "HEX",
+         hectares = round(hectares, 0))|>
+  clean_names()
+
+evt_merged <- bind_rows(evt_hexs,
+                        evt_huc12s,
+                        evt_ltas)
+
+
+
+# Summarize hectares by evt_name and unit
+evt_summary <- evt_merged %>%
+  group_by(evt_name, unit) %>%
+  summarise(total_hectares = sum(hectares), .groups = "drop")
+
+evt_summary <- evt_summary %>%
+  group_by(evt_name) %>%
+  filter(all(total_hectares >= 100)) %>%
+  ungroup()
+
+
+
+# Calculate mean hectares per evt_name and get top 20
+evt_order <- evt_summary %>%
+  group_by(evt_name) %>%
+  summarise(mean_hectares = mean(total_hectares)) %>%
+  arrange(desc(mean_hectares)) %>%  # descending to get top 20
+  slice_head(n = 20) %>%
+  pull(evt_name)
+
+# Reverse the order for plotting (largest at bottom)
+evt_order <- rev(evt_order)
+
+# Filter evt_summary to only include top 20 evt_names
+evt_summary <- evt_summary %>%
+  filter(evt_name %in% evt_order)
+
+# Wrap long labels and set factor levels in reversed order
+evt_summary$evt_name <- str_wrap(evt_summary$evt_name, width = 30)
+evt_summary$evt_name <- factor(evt_summary$evt_name, levels = str_wrap(evt_order, width = 30))
+
+
+
+# Custom colors
+unit_colors <- c(
+      "HEX" = "#C59CD6",
+      "LTA" = "#ADD69C",
+      "HUC12" = "#9BDEDE"
+)
+
+
+# Plot
+ggplot(evt_summary, aes(x = evt_name, y = total_hectares, fill = unit)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  coord_flip() +
+  scale_fill_manual(values = unit_colors) +
+  scale_y_continuous(labels = comma) +  # format y-axis with commas
+  labs(
+    x = "EVT Name",
+    y = "Total Hectares",
+    fill = "Unit",
+    title = "Total Hectares by EVT Name and Unit",
+    subtitle = "Top most represented 20 EVTs shown"
+  ) +
+
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = c(1, 0),  # bottom right
+    legend.justification = c(1, 0)
+  )
+
+
+
+
+```
+
+### Comparing the EVT distributions between units
+
+The violin plot below illustrates the distribution of EVTs per unit type.  Each dot is the number of EVTs for a polygon. 
+
+```{r}
+#| label: evt_violin
+#| echo: false
+#| message: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 12
+
+# Step 1: Summarize unique evt names per unit and id
+evt_violin <- evt_merged %>%
+  group_by(unit, id) %>%
+  summarise(unique_evt = n_distinct(evt_name), .groups = "drop")
+
+# Step 2: Calculate summary stats for mean and SD
+evt_stats <- evt_violin %>%
+  group_by(unit) %>%
+  summarise(
+    mean_evt = mean(unique_evt),
+    sd_evt = sd(unique_evt),
+    label = paste0("Mean = ", round(mean_evt, 2), "\nSD = ", round(sd_evt, 2)),
+    .groups = "drop"
+  )
+
+# Step 3: Create violin plot with mean, SD bars, and annotation
+ggplot(evt_violin, aes(x = unit, y = unique_evt, fill = unit)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.8) +
+  geom_point(data = evt_stats, aes(x = unit, y = mean_evt), color = "black", size = 3) +
+  geom_errorbar(data = evt_stats,
+                aes(x = unit, ymin = mean_evt - sd_evt, ymax = mean_evt + sd_evt),
+                inherit.aes = FALSE,
+                width = 0.2, color = "black", linewidth = 0.8) +
+  geom_text(data = evt_stats,
+            aes(x = unit, y = 0.5, label = label),
+            inherit.aes = FALSE,
+            hjust = 0.5, vjust = 1,
+            size = 4, color = "black") +
+  labs(
+    title = "Distribution of Unique EVT Names per Unit Type",
+    subtitle = "Violin plot with mean and standard deviation",
+    x = "Unit Type",
+    y = "Number of Unique EVT Names"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_fill_manual(values = c(
+      "HEX" = "#C59CD6",
+      "LTA" = "#ADD69C",
+      "HUC12" = "#9BDEDE"
+  ))
+
+
+```
+
+### Quick statistical look at EVTs
+
+Below we calculate Shannon's Diversity Index per unit type, area-weighted.
+
+```{r}
+#| label: shannon's evt
+#| echo: false
+#| message: false
+#| warning: false
+#| fig.width: 10
+#| fig.height: 12
+
+#  Aggregate area per evt_name within each unit and id
+evt_area <- evt_merged %>%
+  group_by(unit, id, evt_name) %>%
+  summarise(area = sum(hectares), .groups = "drop")
+
+#  Pivot to wide format for diversity calculation
+evt_matrix <- evt_area %>%
+  pivot_wider(names_from = evt_name, values_from = area, values_fill = 0)
+
+# Calculate Shannon Diversity Index
+evt_matrix$shannon <- diversity(evt_matrix[ , !(names(evt_matrix) %in% c("unit", "id"))], index = "shannon")
+
+
+# Visualize with violin plot
+ggplot(evt_matrix, aes(x = unit, y = shannon, fill = unit)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.8) +
+  labs(
+    title = "Shannon Diversity Index by Unit Type",
+    subtitle = "Area-weighted ecological diversity",
+    x = "Unit Type",
+    y = "Shannon Diversity Index"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_fill_manual(values = c(
+      "HEX" = "#C59CD6",
+      "LTA" = "#ADD69C",
+      "HUC12" = "#9BDEDE"))
+```
+
+
+<br>
+
+### Statistical Analysis of EVTs
+
+We used a **Kruskal-Wallis test** to assess differences in Shannon Diversity Index across unit types. This non-parametric test is appropriate for comparing distributions when assumptions of normality may not be met.
+
+The test formula was:
+
+**Shannon Diversity Index ~ Unit Type**
+
+The results were as follows:
+
+- **Kruskal-Wallis Chi-squared**: `r round(kruskal.test(shannon ~ unit, data = evt_matrix)$statistic, 2)`  
+- **Degrees of freedom**: `r kruskal.test(shannon ~ unit, data = evt_matrix)$parameter`  
+- **p-value**: `r format.pval(kruskal.test(shannon ~ unit, data = evt_matrix)$p.value, digits = 3)`
+
+These results suggest `r if (kruskal.test(shannon ~ unit, data = evt_matrix)$p.value < 0.05) {"a statistically significant"} else {"no statistically significant"}` difference in ecological diversity among the unit types.
+

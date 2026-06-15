@@ -1,0 +1,40 @@
+project:
+  type: website
+  output-dir: docs
+
+  preview: 
+    watch-inputs: false
+
+website:
+  title: "Exploring Ecosystem Variability Across Different Stratifications"
+  navbar:
+    search: TRUE
+    pinned: true
+    left:
+      - href: index.qmd
+        text: Home
+      - href: polygons.qmd
+        text: Polygons
+      - href: methods.qmd
+        text: Methods
+      - href: results.qmd
+        text: Results
+
+      
+
+
+format:
+  html:
+    theme: 
+      light: flatly
+      dark: darkly
+    css: styles.css
+    toc: true
+    linksource:   "#00008B"# Dark blue color
+
+
+editor: source
+
+
+
+

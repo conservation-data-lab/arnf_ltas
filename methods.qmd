@@ -1,0 +1,777 @@
+---
+title: "Methods and Code"
+---
+
+## Methods overview
+
+Our workflow was fairly straightforward and is repeatable for any national forest (or other landscape):
+
+1. Obtain input data
+
+    * National Forest Administrative boundaries from https://data.fs.usda.gov/geodata/edw/datasets.php
+    * Provisional Land Type Associations shared by Dr. Sarah Anderson
+    * HUC 12 watersheds obtained via the [nhdplusTools](https://doi-usgs.github.io/nhdplusTools/) R package
+    * LANDFIRE [Biophysical Settings (BpS)](https://landfire.gov/vegetation/bps) and [Existing Vegetation Type-Ecological Systems (EVT)](https://landfire.gov/vegetation/evt) data via the [rlandfire](https://github.com/bcknr/rlandfire) R package
+    
+*LANDFIRE and watershed data downloaded after selecting national forest of interest*
+
+2. Generate hexagons for area of interest
+3. Extract BpS and EVT values per polygon then join attributes
+4. Developed summary visualizations and statistics
+
+All data processing and wrangling work was completed in R-Studio and maps were made in QGIS.
+
+
+## Compiled code
+
+R code primarily written by Randy Swaty augmented by Co-Pilot AI and testing by Becky Lane.  
+
+* code is drafty and most likely not optimized for efficiency.  Further, annotations incomplete and inconsistent.
+* with the exception of LTA data, all is open sourced and available through R packages
+* any questions should be sent to rswaty@tnc.org
+
+All of that said, code has been rerun multiple times without hangups.  We'd love to hear that you have worked through the code!
+
+
+
+
+
+```{r}
+#| label: "raw compiled code"
+#| message: true
+#| warning: true
+#| eval: false
+
+
+
+## Notes 
+# Calculate zonal stats for ltas
+# Randy Swaty
+# July 29, 2025
+
+## Dependencies 
+
+# Define forest name
+forest_name <- "Arapahoe and Roosevelt"
+
+# Create output directory
+output_dir <- paste0("outputs_", forest_name)
+dir.create(output_dir, showWarnings = FALSE)
+
+
+# Load libraries
+library(sf)
+library(terra)
+library(dplyr)
+library(exactextractr)
+library(rlandfire)  # For landfireAPIv2
+library(foreign)   # For write.dbf if needed
+
+# Load in data
+
+ltas <- st_read("inputs/eCognition_LTA_20250520.shp") %>%
+  select(UID, geometry) %>%
+  st_transform(crs = 5070)
+
+national_forests <- st_read("inputs/S_USA.AdministrativeForest.shp")
+
+bps_conus_atts <- read.csv("inputs/LF20_BPS_220.csv")
+
+evt_conus_atts <- read.csv("inputs/LF23_EVT_240.csv")
+
+# Select and buffer AOI and clip ltas 
+
+
+# View unique forest names (optional)
+unique(national_forests$FORESTNAME)  # Replace with actual column name
+
+
+# Select one forest by name and transform CRS
+selected_forest <- national_forests %>%
+  filter(FORESTNAME == "Ouachita National Forest") %>%
+  st_transform(crs = 5070)
+
+# Transform LTAs to match CRS
+ltas_transformed <- st_transform(ltas, crs = 5070)
+
+# Select LTAs that intersect (touch or overlap) the forest-will be used for extraction below.
+ltas_selected <- ltas_transformed %>%
+  filter(lengths(st_intersects(., selected_forest)) > 0)
+
+# Quick base R plot
+plot(st_geometry(ltas_selected), col = "lightgreen", border = "darkgreen", main = "LTAs Intersecting Ouachita National Forest")
+plot(st_geometry(selected_forest), border = "red", lwd = 2, add = TRUE)
+
+# Write out selected forest and LTAs as shapefiles
+
+st_write(selected_forest, file.path(output_dir, paste0(forest_name, ".shp")))
+
+st_write(ltas_selected, file.path(output_dir, paste0("ltas_selected.shp")))
+
+# Use ltas_selected for extractions
+
+# expand area for data download
+
+# Buffer the selected LTAs by 1 km (adjust distance as needed)
+ltas_buffered <- st_buffer(ltas_selected, dist = 10000)  # distance in meters
+
+# Plot the buffered LTAs with the forest boundary
+plot(st_geometry(ltas_buffered), col = "lightblue", border = "blue", main = "Buffered LTAs (1 km)")
+plot(st_geometry(selected_forest), border = "red", lwd = 2, add = TRUE)
+
+
+
+
+
+
+## Download LANDFIRE data 
+
+download_aoi <- getAOI(ltas_buffered)
+products <- c("200BPS", "240EVT")
+projection <- 5070
+resolution <- 30
+email <- "rswaty@tnc.org"
+
+save_file <- tempfile(fileext = ".zip")
+ncal <- landfireAPIv2(products, download_aoi, projection, resolution, path = save_file, email = email)
+
+dest_file <- file.path("inputs", "landfire_data.zip")
+file.rename(save_file, dest_file)
+
+temp_dir <- tempfile()
+dir.create(temp_dir)
+unzip(dest_file, exdir = temp_dir)
+
+unzipped_files <- list.files(temp_dir, full.names = TRUE)
+for (file in unzipped_files) {
+  file_name <- basename(file)
+  file_extension <- sub("^[^.]*", "", file_name)
+  new_file_path <- file.path("inputs", paste0("landfire_data", file_extension))
+  file.rename(file, new_file_path)
+}
+unlink(temp_dir, recursive = TRUE)
+
+# Read and split stacked raster
+stacked_rasters <- rast("inputs/landfire_data.tif")  
+
+for (lyr in names(stacked_rasters)) assign(lyr, stacked_rasters[[lyr]])
+
+# Step 6: Process BpS
+
+bps_aoi <- US_200BPS %>%
+  crop(ltas_selected) %>%
+  mask(ltas_selected)
+
+levels(bps_aoi)[[1]] <- bps_conus_atts
+
+activeCat(bps_aoi) <- "VALUE"
+
+bps_aoi_atts <- values(bps_aoi, dataframe = TRUE, na.rm = TRUE) %>%
+  table(dnn = "VALUE") %>%
+  as.data.frame() %>%
+  mutate_all(as.character) %>%
+  mutate_all(as.integer) %>%
+  left_join(cats(bps_aoi)[[1]], by = "VALUE") %>%
+  filter(Freq != 0) %>%
+  mutate(
+    ACRES = round((Freq * 900 / 4046.86), 0),
+    REL_PERCENT = round((Freq / sum(Freq)), 3) * 100
+  ) %>%
+  arrange(desc(REL_PERCENT))
+
+
+## Optional write out raster and attributes 
+# BpS raster
+writeRaster(bps_aoi, file.path(output_dir, paste0("bps_aoi_", forest_name, ".tif")),
+            gdal = c("COMPRESS=NONE", "TFW=YES"),
+            datatype = "INT2S",
+            overwrite = TRUE)
+
+# BpS attributes DBF
+write.dbf(bps_aoi_atts, file.path(output_dir, paste0("bps_aoi_", forest_name, ".tif.vat.dbf")))
+
+# BpS attributes CSV
+write.csv(bps_aoi_atts, file.path(output_dir, paste0("bps_aoi_attributes_", forest_name, ".csv")), row.names = FALSE)
+
+
+
+
+## Process EVT 
+
+evt_aoi <- US_240EVT %>%
+  crop(ltas_selected) %>%
+  mask(ltas_selected)
+
+
+levels(evt_aoi)[[1]] <- evt_conus_atts
+activeCat(evt_aoi) <- "VALUE"
+
+
+evt_aoi_atts <- values(evt_aoi, dataframe = T, na.rm = T) %>%
+  table(dnn = "VALUE") %>%
+  as.data.frame() %>%
+  mutate_all(as.character) %>%
+  mutate_all(as.integer) %>%
+  left_join(cats(evt_aoi)[[1]], by = "VALUE") %>%
+  filter(Freq != 0) %>%
+  mutate(ACRES = round((Freq * 900 / 4046.86), 0),
+         REL_PERCENT = round((Freq / sum(Freq)), 3) * 100) %>%
+  arrange(desc(REL_PERCENT))
+
+## Optional write out EVT raster and attributes 
+
+# EVT raster 
+writeRaster(evt_aoi, 
+            filename = file.path(output_dir, paste0("evt_aoi_", forest_name, ".tif")),
+            gdal = c("COMPRESS=NONE", "TFW=YES"),
+            datatype = "INT2S",
+            overwrite = TRUE)
+
+
+# EVT attributes CSV
+write.csv(evt_aoi_atts, file.path(output_dir, paste0("evt_aoi_attributes_", forest_name, ".csv")), row.names = FALSE)
+
+
+
+## BpSs per LTA 
+# Ensure CRS match
+ltas_selected <- st_transform(ltas_selected, crs = crs(bps_aoi))
+
+# Convert sf to SpatVector
+ltas_vect <- vect(ltas_selected)
+
+# Extract raster values with weights (fractional pixel coverage)
+bps_extract <- terra::extract(bps_aoi, ltas_vect, weights = TRUE, exact = FALSE)
+
+# Add UID from polygons
+bps_extract$UID <- ltas_selected$UID[bps_extract$ID]
+
+# Summarize by UID and BpS value
+bps_lta_summary <- bps_extract %>%
+  group_by(UID, VALUE) %>%
+  summarise(weighted_pixels = sum(weight, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    hectares = weighted_pixels * res(bps_aoi)[1] * res(bps_aoi)[2] / 10000
+  )
+
+bps_lta_summary$VALUE <- as.numeric(as.character(bps_lta_summary$VALUE ))
+
+
+# Optional: Join with BpS attribute table
+# Select only necessary columns from bps_conus_atts
+bps_conus_atts_clean <- bps_conus_atts %>%
+  select(VALUE, BPS_NAME, GROUPVEG, FRI_REPLAC, FRI_MIXED, FRI_SURFAC, FRI_ALLFIR,
+         PRC_REPLAC, PRC_MIXED, PRC_SURFAC, FRG_NEW, R, G, B, RED, GREEN, BLUE)
+
+# Join without duplication
+bps_lta_summary <- bps_lta_summary %>%
+  left_join(bps_conus_atts_clean, by = "VALUE")
+
+# BpS lta summary
+write.csv(bps_lta_summary, file = file.path(output_dir, paste0("bps_lta_summary_", forest_name, ".csv")), row.names = FALSE)
+
+## EVTs per LTA 
+# Ensure CRS match
+ltas_clipped_forest <- st_transform(ltas_selected, crs = crs(evt_aoi))
+
+# Convert sf to SpatVector
+ltas_vect <- vect(ltas_selected)
+
+# Extract raster values with weights (fractional pixel coverage)
+evt_extract <- terra::extract(evt_aoi, ltas_vect, weights = TRUE, exact = FALSE)
+
+# Add UID from polygons
+evt_extract$UID <- ltas_selected$UID[evt_extract$ID]
+
+# Summarize by UID and BpS value
+evt_lta_summary <- evt_extract %>%
+  group_by(UID, VALUE) %>%
+  summarise(weighted_pixels = sum(weight, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    hectares = weighted_pixels * res(bps_aoi)[1] * res(bps_aoi)[2] / 10000
+  )
+
+evt_lta_summary$VALUE <- as.numeric(as.character(evt_lta_summary$VALUE ))
+
+
+
+
+# Optional: Join with BpS attribute table
+evt_lta_summary <- evt_lta_summary %>%
+  left_join(evt_conus_atts, by = c("VALUE" = "VALUE"))
+
+# View result
+head(evt_lta_summary)
+
+# Write out
+write.csv(evt_lta_summary, file = file.path(output_dir, paste0("evt_lta_summary_", forest_name, ".csv")), row.names = FALSE)
+
+
+
+## Notes 
+# Calculate zonal stats for huc12s
+# Randy Swaty
+# July 29, 2025
+
+## Dependencies 
+library(nhdplusTools)
+library(sf)
+library(terra)
+library(dplyr)
+library(exactextractr)
+library(rlandfire)  # For landfireAPIv2
+library(foreign)    # For write.dbf if needed
+
+## Define forest name and output directory 
+forest_name <- "ouachita"
+output_dir <- paste0("outputs_", forest_name)
+
+
+## Load in data 
+national_forests <- st_read("inputs/S_USA.AdministrativeForest.shp")
+bps_conus_atts <- read.csv("inputs/LF20_BPS_220.csv")
+evt_conus_atts <- read.csv("inputs/LF23_EVT_240.csv")
+
+## Select and buffer AOI and clip LTAs 
+unique(national_forests$FORESTNAME)  # Optional: view forest names
+selected_forest <- national_forests %>%
+  filter(FORESTNAME == "Ouachita National Forest") %>%
+  st_transform(crs = 5070)
+
+## Get HUC12s 
+huc12s <- get_huc(AOI = selected_forest, type = "huc12")
+
+## Load and split LANDFIRE data 
+stacked_rasters <- rast("inputs/landfire_data.tif")
+for (lyr in names(stacked_rasters)) assign(lyr, stacked_rasters[[lyr]])
+
+# quick plot to make sure that hucs are captured by downloaded data
+
+# Transform HUC12s to match raster CRS if needed
+huc12s <- st_transform(huc12s, crs = crs(US_200BPS))
+
+# Plot the raster
+plot(US_200BPS, main = "HUC12 Outlines over USBPS200 Raster")
+
+# Add HUC12 outlines
+plot(st_geometry(huc12s), add = TRUE, border = "blue", lwd = 1)
+     
+## Write out hucs 
+
+
+# Keep only the 'huc12' and geometry columns
+huc12s_minimal <- huc12s[, c("huc12", attr(huc12s, "sf_column"))]
+
+
+# Calculate area in square meters and convert to hectares
+huc12s_minimal <- huc12s_minimal %>%
+  mutate(hectares = as.numeric(st_area(.)) / 10000)
+
+
+# Write to shapefile
+st_write(huc12s_minimal, file.path(output_dir, "huc12_selected.shp"))
+
+
+## Process BpS ## Process BpS TRUE
+bps_aoi <- US_200BPS %>%
+  crop(huc12s) %>%
+  mask(huc12s)
+
+levels(bps_aoi)[[1]] <- bps_conus_atts
+activeCat(bps_aoi) <- "VALUE"
+
+bps_aoi_atts <- values(bps_aoi, dataframe = TRUE, na.rm = TRUE) %>%
+  table(dnn = "VALUE") %>%
+  as.data.frame() %>%
+  mutate(VALUE = as.integer(as.character(VALUE)),
+         Freq = as.integer(Freq)) %>%
+  filter(Freq != 0) %>%
+  left_join(bps_conus_atts %>%
+              select(VALUE, BPS_NAME, GROUPVEG, FRI_REPLAC, FRI_MIXED, FRI_SURFAC,
+                     FRI_ALLFIR, PRC_REPLAC, PRC_MIXED, PRC_SURFAC, FRG_NEW,
+                     R, G, B, RED, GREEN, BLUE),
+            by = "VALUE") %>%
+  mutate(
+    ACRES = round((Freq * 900 / 4046.86), 0),
+    REL_PERCENT = round((Freq / sum(Freq)), 3) * 100
+  ) %>%
+  arrange(desc(REL_PERCENT))
+
+## Optional write out raster and attributes 
+# writeRaster(bps_aoi, file.path(output_dir, paste0("bps_aoi_", forest_name, ".tif")),
+#             gdal = c("COMPRESS=NONE", "TFW=YES"),
+#             datatype = "INT2S",
+#             overwrite = TRUE)
+# 
+# write.dbf(bps_aoi_atts, file.path(output_dir, paste0("bps_aoi_", forest_name, ".tif.vat.dbf")))
+# write.csv(bps_aoi_atts, file.path(output_dir, paste0("bps_aoi_attributes_", forest_name, ".csv")), row.names = FALSE)
+
+## Process EVT 
+evt_aoi <- US_240EVT %>%
+  crop(huc12s) %>%
+  mask(huc12s)
+
+levels(evt_aoi)[[1]] <- evt_conus_atts
+activeCat(evt_aoi) <- "VALUE"
+
+evt_aoi_atts <- values(evt_aoi, dataframe = TRUE, na.rm = TRUE) %>%
+  table(dnn = "VALUE") %>%
+  as.data.frame() %>%
+  mutate(VALUE = as.integer(as.character(VALUE)),
+         Freq = as.integer(Freq)) %>%
+  filter(Freq != 0) %>%
+  left_join(evt_conus_atts, 
+            by = "VALUE") %>%
+  mutate(
+    ACRES = round((Freq * 900 / 4046.86), 0),
+    REL_PERCENT = round((Freq / sum(Freq)), 3) * 100
+  ) %>%
+  arrange(desc(REL_PERCENT))
+# 
+# ## Optional write out EVT raster and attributes 
+# writeRaster(evt_aoi, file.path(output_dir, paste0("evt_aoi_", forest_name, ".tif")),
+#             gdal = c("COMPRESS=NONE", "TFW=YES"),
+#             datatype = "INT2S",
+#             overwrite = TRUE)
+# 
+# write.dbf(evt_aoi_atts, file.path(output_dir, paste0("evt_aoi_", forest_name, ".tif.vat.dbf")))
+# 
+# write.csv(evt_aoi_atts, file.path(output_dir, paste0("evt_aoi_attributes_", forest_name, ".csv")), row.names = FALSE)
+
+## BpSs per HUC12 
+
+## BpSs per HUC12 
+# Step 1: Transform huc12s to match CRS of bps_aoi
+huc12s_forest <- huc12s |>
+  st_transform(crs = crs(bps_aoi)) |>
+  mutate(huc12 = huc12)  # assuming 'huc12' is already a column in huc12s
+
+# Step 2: Convert sf object to terra vector
+huc12s_vect <- vect(huc12s_forest)
+
+# Step 3: Extract BpS raster values by HUC12 polygons with weights
+bps_extract <- terra::extract(bps_aoi, huc12s_vect, weights = TRUE, exact = FALSE)
+
+# Step 4: Replace polygon index with actual huc12 values
+bps_extract <- bps_extract |>
+  mutate(ID = huc12s_forest$huc12[ID])  # replaces ID with huc12
+
+# Step 5: Summarize BpS data per HUC12
+bps_huc12_summary <- bps_extract |>
+  group_by(ID, VALUE) |>
+  summarise(weighted_pixels = sum(weight, na.rm = TRUE), .groups = "drop") |>
+  mutate(
+    VALUE = as.integer(as.character(VALUE)),
+    hectares = weighted_pixels * res(bps_aoi)[1] * res(bps_aoi)[2] / 10000
+  ) |>
+  left_join(
+    bps_conus_atts |>
+      select(VALUE, BPS_NAME, GROUPVEG, FRI_REPLAC, FRI_MIXED, FRI_SURFAC,
+             FRI_ALLFIR, PRC_REPLAC, PRC_MIXED, PRC_SURFAC, FRG_NEW,
+             R, G, B, RED, GREEN, BLUE),
+    by = "VALUE"
+  )
+
+
+
+write.csv(bps_huc12_summary, file.path(output_dir, paste0("bps_huc12_summary_", forest_name, ".csv")), row.names = FALSE)
+
+## EVTs per HUC12 
+
+# Step 1: Transform huc12s to match CRS of evt_aoi
+huc12s_forest <- huc12s |>
+  st_transform(crs = crs(evt_aoi)) |>
+  mutate(huc12 = huc12)  # assuming 'huc12' is already a column in huc12s
+
+# Step 2: Convert sf object to terra vector
+huc12s_vect <- vect(huc12s_forest)
+
+# Step 3: Extract EVT raster values by HUC12 polygons with weights
+EVT_extract <- terra::extract(evt_aoi, huc12s_vect, weights = TRUE, exact = FALSE)
+
+# Step 4: Replace polygon index with actual huc12 values
+EVT_extract <- EVT_extract |>
+  mutate(ID = huc12s_forest$huc12[ID])  # replaces ID with huc12
+
+# Step 5: Summarize EVT data per HUC12
+EVT_huc12_summary <- EVT_extract |>
+  group_by(ID, VALUE) |>
+  summarise(weighted_pixels = sum(weight, na.rm = TRUE), .groups = "drop") |>
+  mutate(
+    VALUE = as.integer(as.character(VALUE)),
+    hectares = weighted_pixels * res(evt_aoi)[1] * res(evt_aoi)[2] / 10000
+  ) |>
+  left_join(evt_conus_atts, by = "VALUE")
+
+# Step 6: Write output to CSV
+write.csv(
+  EVT_huc12_summary,
+  file.path(output_dir, paste0("evt_huc12_summary_", forest_name, ".csv")),
+  row.names = FALSE
+)
+
+## Notes 
+# Calculate zonal stats for 10k HA hexagons that cover HUC12 area (faster than loading LTAs)
+# Randy Swaty
+# July 29, 2025
+
+## Dependencies 
+library(nhdplusTools)
+library(sf)
+library(terra)
+library(dplyr)
+library(exactextractr)
+library(rlandfire)
+library(foreign)
+
+## Define forest name and output directory 
+forest_name <- "ouachita"
+output_dir <- paste0("outputs_", forest_name)
+dir.create(output_dir, showWarnings = FALSE)
+
+## Load in data 
+national_forests <- st_read("inputs/S_USA.AdministrativeForest.shp")
+bps_conus_atts <- read.csv("inputs/LF20_BPS_220.csv")
+evt_conus_atts <- read.csv("inputs/LF23_EVT_240.csv")
+
+## Select AOI 
+selected_forest <- national_forests %>%
+  filter(FORESTNAME == "Ouachita National Forest") %>%
+  st_transform(crs = 5070)
+
+## Get HUC12s 
+huc12s <- get_huc(AOI = selected_forest, type = "huc12")
+
+## Load LANDFIRE raster stack 
+stacked_rasters <- rast("inputs/landfire_data.tif")
+for (lyr in names(stacked_rasters)) assign(lyr, stacked_rasters[[lyr]])
+
+## Hex Grid Zonal Stats 
+
+# Union of HUC12s
+huc12_union <- st_union(huc12s)
+
+# Hexagon side length for ~25,000 ha hexagons
+hex_side <- 9809.44
+
+# Create full hex grid
+hex_grid <- st_make_grid(huc12_union,
+                         cellsize = hex_side,
+                         square = FALSE,
+                         what = "polygons") %>%
+  st_sf()
+
+# Filter hexagons that intersect the HUC12 union
+hex_grid <- hex_grid[st_intersects(hex_grid, huc12_union, sparse = FALSE), ]
+hex_grid$hex_id <- seq_len(nrow(hex_grid))
+
+## Filter hexagons fully within raster extents 
+bps_extent <- as.polygons(ext(US_200BPS)) %>% st_as_sf()
+evt_extent <- as.polygons(ext(US_240EVT)) %>% st_as_sf()
+
+# 🔧 Assign CRS from original rasters
+st_crs(bps_extent) <- crs(US_200BPS)
+st_crs(evt_extent) <- crs(US_240EVT)
+
+
+hex_grid <- st_transform(hex_grid, crs = st_crs(bps_extent))
+hex_grid_inside <- hex_grid[
+  st_within(hex_grid, bps_extent, sparse = FALSE) &
+    st_within(hex_grid, evt_extent, sparse = FALSE),
+]
+
+## Plot raster and hexagons for inspection 
+plot(US_200BPS, main = "US_200BPS Raster with HUC12s and Hexagons")
+plot(st_transform(huc12s, crs = crs(US_200BPS))$geometry, add = TRUE, border = "blue", lwd = 2)
+plot(hex_grid_inside$geometry, add = TRUE, border = "green", lwd = 1)
+
+## write hexagons
+
+st_write(hex_grid_inside, file.path(output_dir, paste0("hexs_selected.shp")))
+
+## Crop and mask BpS and EVT to hex grid extent 
+hex_vect <- vect(hex_grid_inside)
+
+bps_hex_aoi <- US_200BPS %>%
+  crop(hex_vect) %>%
+  mask(hex_vect)
+
+evt_hex_aoi <- US_240EVT %>%
+  crop(hex_vect) %>%
+  mask(hex_vect)
+
+levels(bps_hex_aoi)[[1]] <- bps_conus_atts
+activeCat(bps_hex_aoi) <- "VALUE"
+
+levels(evt_hex_aoi)[[1]] <- evt_conus_atts
+activeCat(evt_hex_aoi) <- "VALUE"
+
+## Extract and summarize BpS per hex 
+bps_hex_extract <- terra::extract(bps_hex_aoi, hex_vect, weights = TRUE, exact = FALSE)
+bps_hex_extract$hex_id <- hex_vect$hex_id[bps_hex_extract$ID]
+
+bps_hex_summary <- bps_hex_extract %>%
+  group_by(hex_id, VALUE) %>%
+  summarise(weighted_pixels = sum(weight, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    VALUE = as.integer(as.character(VALUE)),
+    hectares = weighted_pixels * res(bps_hex_aoi)[1] * res(bps_hex_aoi)[2] / 10000
+  ) %>%
+  left_join(bps_conus_atts %>%
+              select(VALUE, BPS_NAME, GROUPVEG, FRI_REPLAC, FRI_MIXED, FRI_SURFAC,
+                     FRI_ALLFIR, PRC_REPLAC, PRC_MIXED, PRC_SURFAC, FRG_NEW,
+                     R, G, B, RED, GREEN, BLUE),
+            by = "VALUE")
+
+## Extract and summarize EVT per hex 
+evt_hex_extract <- terra::extract(evt_hex_aoi, hex_vect, weights = TRUE, exact = FALSE)
+evt_hex_extract$hex_id <- hex_vect$hex_id[evt_hex_extract$ID]
+
+evt_hex_summary <- evt_hex_extract %>%
+  group_by(hex_id, VALUE) %>%
+  summarise(weighted_pixels = sum(weight, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    VALUE = as.integer(as.character(VALUE)),
+    hectares = weighted_pixels * res(evt_hex_aoi)[1] * res(evt_hex_aoi)[2] / 10000
+  ) %>%
+  left_join(evt_conus_atts, by = "VALUE")
+
+## Write outputs 
+write.csv(bps_hex_summary, file.path(output_dir, paste0("bps_hex_summary_", forest_name, ".csv")), row.names = FALSE)
+write.csv(evt_hex_summary, file.path(output_dir, paste0("evt_hex_summary_", forest_name, ".csv")), row.names = FALSE)
+
+
+
+## Notes 
+# Wrangle and explore outputs for LTAs, hexs and watersheds
+# Randy Swaty
+# September 9, 2025
+
+## Dependencies 
+
+# Define forest name
+forest_name <- "Ouachita NF"
+
+
+# Load libraries
+library(janitor)
+library(tidyverse)
+
+# Load in and wrangle datasets
+
+bps_ltas <- read_csv("outputs_ouachita/bps_lta_summary_ouachita.csv") |>
+  select(c(UID,
+           hectares,
+           BPS_NAME)) |>
+  rename("id" = "UID") |>
+  mutate(UNIT = "LTA",
+         hectares = round(hectares, 0))|>
+  clean_names()
+
+
+bps_huc12s <- read_csv("outputs_ouachita/bps_huc12_summary_ouachita.csv") |>
+  select(ID, hectares, BPS_NAME) |>
+  rename(id = ID) |>
+  mutate(
+    id = as.numeric(as.factor(id)),  # convert 'id' column to numeric
+    UNIT = "HUC12",
+    hectares = round(hectares, 0)
+  ) |>
+  clean_names()
+
+
+bps_hexs <- read_csv("outputs_ouachita/bps_hex_summary_ouachita.csv")|>
+  select(c(hex_id,
+           hectares,
+           BPS_NAME)) |>
+  rename("id" = "hex_id") |>
+  mutate(UNIT = "HEX",
+         hectares = round(hectares, 0))|>
+  clean_names()
+
+bps_merged <- bind_rows(bps_hexs,
+                        bps_huc12s,
+                        bps_ltas)
+
+
+## Visualize for BpSs
+
+
+
+# Step 1: Summarize unique BPS names per unit and id
+bps_summary <- bps_merged %>%
+  group_by(unit, id) %>%
+  summarise(unique_bps = n_distinct(bps_name), .groups = "drop")
+
+# Step 2: Calculate summary stats for mean and SD
+bps_stats <- bps_summary %>%
+  group_by(unit) %>%
+  summarise(
+    mean_bps = mean(unique_bps),
+    sd_bps = sd(unique_bps),
+    label = paste0("Mean = ", round(mean_bps, 2), "\nSD = ", round(sd_bps, 2)),
+    .groups = "drop"
+  )
+
+# Step 3: Create violin plot with mean, SD bars, and annotation
+ggplot(bps_summary, aes(x = unit, y = unique_bps, fill = unit)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.8) +
+  geom_point(data = bps_stats, aes(x = unit, y = mean_bps), color = "black", size = 3) +
+  geom_errorbar(data = bps_stats,
+                aes(x = unit, ymin = mean_bps - sd_bps, ymax = mean_bps + sd_bps),
+                inherit.aes = FALSE,
+                width = 0.2, color = "black", linewidth = 0.8) +
+  geom_text(data = bps_stats,
+            aes(x = unit, y = 0.5, label = label),
+            inherit.aes = FALSE,
+            hjust = 0.5, vjust = 1,
+            size = 4, color = "black") +
+  labs(
+    title = "Distribution of Unique BPS Names per Unit Type",
+    subtitle = "Violin plot with mean and standard deviation",
+    x = "Unit Type",
+    y = "Number of Unique BPS Names"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_fill_brewer(palette = "Set2")
+
+
+library(dplyr)
+library(tidyr)
+library(vegan)
+library(ggplot2)
+
+# Step 1: Aggregate area per bps_name within each unit and id
+bps_area <- bps_merged %>%
+  group_by(unit, id, bps_name) %>%
+  summarise(area = sum(hectares), .groups = "drop")
+
+# Step 2: Pivot to wide format for diversity calculation
+bps_matrix <- bps_area %>%
+  pivot_wider(names_from = bps_name, values_from = area, values_fill = 0)
+
+# Step 3: Calculate Shannon Diversity Index
+bps_matrix$shannon <- diversity(bps_matrix[ , !(names(bps_matrix) %in% c("unit", "id"))], index = "shannon")
+
+# Step 4: Kruskal-Wallis test
+kruskal.test(shannon ~ unit, data = bps_matrix)
+
+# Step 5: Visualize with violin plot
+ggplot(bps_matrix, aes(x = unit, y = shannon, fill = unit)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.8) +
+  labs(
+    title = "Shannon Diversity Index by Unit Type",
+    subtitle = "Area-weighted ecological diversity",
+    x = "Unit Type",
+    y = "Shannon Diversity Index"
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_fill_brewer(palette = "Set2")
+
+```
+
+
+
+
