@@ -29,6 +29,7 @@ R code primarily written by Randy Swaty augmented by Co-Pilot AI and testing by 
 * code is drafty and most likely not optimized for efficiency.  Further, annotations incomplete and inconsistent.
 * with the exception of LTA data, all is open sourced and available through R packages
 * any questions should be sent to rswaty@tnc.org
+* make sure to check names (e.g., forest, directories)
 
 All of that said, code has been rerun multiple times without hangups.  We'd love to hear that you have worked through the code!
 
