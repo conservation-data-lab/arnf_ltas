@@ -1,6 +1,10 @@
 ---
 title: ""
+author:
+  - "Becky Lane (reland@nmu.edu)"
+  - "Randy Swaty (rswaty@tnc.org)"
 format: html
+
 ---
 
 ## Challenge and opportunity
